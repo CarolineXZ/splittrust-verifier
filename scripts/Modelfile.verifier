@@ -1,0 +1,7 @@
+# Ollama Modelfile for a fine-tuned local verifier.
+# 1) Fine-tune llama3.1-8b-instruct (LoRA) on data/verifier_train.jsonl, export to GGUF.
+# 2) ollama create verifier-llama -f scripts/Modelfile.verifier
+# 3) LOCAL_MODEL=verifier-llama in .env
+FROM ./verifier-llama3.1-8b.Q4_K_M.gguf
+PARAMETER temperature 0
+PARAMETER num_ctx 8192

@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Double Verifier</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --paper: #F6F7F5; --panel: #FFFFFF; --ink: #182230; --muted: #5B6775; --rule: #D9DEE3;
+    --inside: #E9F1EB; --inside-rule: #9DBDA6; --outside: #F0F3F6;
+    --allow: #1F7A4D; --block: #B42318; --warn: #8A5A00; --accent: #2F5D8A;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #141A20; --panel: #1A2129; --ink: #E6EAEE; --muted: #98A4B0; --rule: #2A333D;
+            --inside: #1B2A22; --inside-rule: #3E6B4C; --outside: #1E2630;
+            --allow: #4CC38A; --block: #F0716A; --warn: #E2B04A; --accent: #7FB0E0; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.45 var(--sans); }
+  button, input, textarea { font: inherit; color: inherit; }
+  button { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 10px; cursor: pointer; text-align: left; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { border-color: var(--accent); color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  code, pre { font-family: var(--mono); font-size: 12.5px; }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: baseline; padding: 18px 28px 14px; border-bottom: 1px solid var(--rule); }
+  header h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  header .models { color: var(--muted); font-size: 13px; }
+  header .counters { margin-left: auto; display: flex; gap: 22px; font-size: 13px; color: var(--muted); }
+  header .counters b { color: var(--ink); font-weight: 600; font-size: 16px; margin-right: 4px; }
+  header .running { color: var(--warn); }
+  .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: calc(100vh - 62px); }
+  aside { border-right: 1px solid var(--rule); padding: 18px 20px; display: flex; flex-direction: column; gap: 22px; }
+  aside h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 8px; }
+  .stack { display: flex; flex-direction: column; gap: 6px; }
+  .stack button small { display: block; color: var(--muted); font-size: 12px; }
+  .row { display: flex; gap: 6px; }
+  .row input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); }
+  textarea { width: 100%; min-height: 220px; padding: 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); font-family: var(--mono); font-size: 12px; resize: vertical; }
+  .privacy { font-size: 13px; color: var(--muted); display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
+  .privacy b { color: var(--ink); text-align: right; }
+  .privacy b.bad { color: var(--block); }
+  label.toggle { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 4px 0; border-bottom: 1px dashed var(--rule); }
+  label.toggle span.id { color: var(--muted); }
+  details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  details pre { margin-top: 6px; font-size: 11.5px; color: var(--muted); max-height: 260px; overflow: auto; }
+  .msg { font-size: 13px; color: var(--muted); min-height: 1.2em; }
+  .msg.err { color: var(--block); }
+
+  #timeline { padding: 10px 28px 60px; max-width: 1180px; }
+  .empty { color: var(--muted); padding: 60px 0; max-width: 560px; }
+  .scene { margin: 34px 0 10px; padding-top: 14px; border-top: 1px solid var(--rule); }
+  .scene h3 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
+  .scene .task { font-size: 14px; }
+  .scene .task .sees { color: var(--muted); }
+  .note { color: var(--warn); font-size: 13.5px; margin: 10px 0; }
+  .error { color: var(--block); font-size: 13.5px; margin: 10px 0; }
+  .summary { margin: 12px 0 4px; font-size: 14px; }
+  .summary .harm { color: var(--allow); }
+  .summary .harm.bad { color: var(--block); }
+  .readonly { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding: 8px 0; color: var(--muted); font-size: 13px; border-bottom: 1px dashed var(--rule); }
+  .readonly code { color: var(--ink); }
+  .readonly .res { flex-basis: 100%; white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; }
+
+  .decision { margin: 14px 0 18px; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .decision .views { display: grid; grid-template-columns: 1fr 1fr; }
+  .view { padding: 12px 14px 14px; }
+  .view.outside { background: var(--outside); }
+  .view.inside { background: var(--inside); border-left: 2px dashed var(--inside-rule); }
+  .view .where { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+  .view .where b { color: var(--ink); font-weight: 600; }
+  .view pre { padding: 8px 10px; border-radius: 6px; background: var(--panel); border: 1px solid var(--rule); }
+  .verdicts { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .verdict { display: grid; grid-template-columns: 76px 72px 1fr auto; gap: 10px; align-items: baseline; font-size: 13px; }
+  .verdict .layer { color: var(--muted); }
+  .verdict .pill { font-weight: 600; font-size: 12.5px; }
+  .verdict .pill.allow { color: var(--allow); }
+  .verdict .pill.block { color: var(--block); }
+  .verdict .pill.skipped { color: var(--muted); font-weight: 400; }
+  .verdict .reason { color: var(--ink); }
+  .verdict .reason .rule { color: var(--muted); }
+  .verdict .ms { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .outcome { padding: 10px 14px; border-top: 1px solid var(--rule); display: flex; gap: 14px; align-items: baseline; font-size: 14px; }
+  .outcome .status { font-weight: 600; }
+  .decision.ok .outcome .status { color: var(--allow); }
+  .decision.blocked .outcome .status { color: var(--block); }
+  .outcome .text { flex: 1; }
+  .outcome .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .privacy-strip { margin: 10px 0; padding: 10px 14px; border: 1px solid var(--inside-rule); border-radius: 8px; background: var(--inside); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 6px 22px; }
+  .privacy-strip b { font-weight: 600; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--rule); } .decision .views { grid-template-columns: 1fr; } .view.inside { border-left: 0; border-top: 2px dashed var(--inside-rule); } header .counters { margin-left: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Double Verifier</h1>
+  <div class="models" id="models"></div>
+  <div class="running" id="running"></div>
+  <div class="counters">
+    <div><b id="c-int">0</b>intercepted</div>
+    <div><b id="c-exec">0</b>executed</div>
+    <div><b id="c-block">0</b>blocked</div>
+    <div><b id="c-can">0</b>canaries to frontier</div>
+    <div><b id="c-ver">—</b>policy version</div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside>
+    <section>
+      <h2>Run</h2>
+      <div class="stack" id="scenes"></div>
+      <div class="row" style="margin-top:8px">
+        <input id="task" placeholder="Or type a task for the live actor…">
+        <button id="run-task" class="primary">Run task</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="run-all">Run scenes 1–5</button>
+        <button id="reset">Reset environment</button>
+      </div>
+      <label class="toggle" style="margin-top:8px"><span>Scripted proposals, live verifiers (replay)</span><input type="checkbox" id="replay"></label>
+      <div class="msg" id="msg"></div>
+    </section>
+
+    <section>
+      <h2>Privacy audit</h2>
+      <div class="privacy" id="privacy"></div>
+    </section>
+
+    <section>
+      <h2>Private policy, inside the perimeter</h2>
+      <div class="stack" id="blocked"></div>
+      <details style="margin-top:10px">
+        <summary>Edit private.yaml</summary>
+        <textarea id="yaml" spellcheck="false"></textarea>
+        <div class="row" style="margin-top:6px"><button id="apply-yaml" class="primary">Apply to the next tool call</button></div>
+      </details>
+      <details style="margin-top:8px"><summary>What the local verifier reads</summary><pre id="private-rendered"></pre></details>
+      <details style="margin-top:8px"><summary>What the frontier verifier reads (general rules only)</summary><pre id="general-rendered"></pre></details>
+    </section>
+  </aside>
+
+  <main id="timeline">
+    <div class="empty" id="empty">Nothing has run yet. Start a scene on the left. Every mutating tool call the actor proposes will appear here, split down the middle: on the left what leaves the perimeter, on the right what stays inside.</div>
+  </main>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let since = 0, state = null, yamlDirty = false;
+const emptyEl = document.getElementById('empty');
+
+function el(tag, attrs = {}, children = []) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v; else n.setAttribute(k, v); }
+  for (const c of children) if (c != null) n.append(c);
+  return n;
+}
+async function api(path, method = 'GET', body) {
+  const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+function setMsg(text, err = false) { $('msg').textContent = text; $('msg').className = 'msg' + (err ? ' err' : ''); }
+function secs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms) + ' ms'; }
+
+// ---------------------------------------------------------------- state (left column, header)
+function renderState(s) {
+  state = s;
+  $('models').textContent = `${s.mode} · actor ${s.models.actor} · frontier verifier ${s.models.frontier} · local verifier ${s.models.local}`;
+  renderCounters(s.counters, s.privacy, s.running);
+  if (!$('scenes').children.length) {
+    for (const key of (s.scene_order || Object.keys(s.scenes))) {
+      const title = s.scenes[key];
+      const b = el('button', { 'data-scene': key }, [`Scene ${key}`, el('small', { text: title })]);
+      b.onclick = () => run(`/api/scene/${key}`);
+      $('scenes').append(b);
+    }
+  }
+  const bl = $('blocked'); bl.replaceChildren();
+  for (const c of s.customers) {
+    const cb = el('input', { type: 'checkbox' }); cb.checked = c.blocked;
+    cb.onchange = async () => { try { renderState(await api('/api/policy/blocked', 'POST', { customer_id: c.customer_id, blocked: cb.checked })); setMsg(`${c.name} ${cb.checked ? 'is now on hold' : 'hold lifted'}; applies to the next tool call.`); } catch (e) { setMsg(e.message, true); } };
+    bl.append(el('label', { class: 'toggle' }, [el('span', {}, [c.name, ' ', el('span', { class: 'id', text: c.customer_id })]), el('span', {}, ['on hold ', cb])]));
+  }
+  if (!yamlDirty) $('yaml').value = s.policy.private_yaml;
+  $('private-rendered').textContent = s.policy.private_rendered;
+  $('general-rendered').textContent = s.policy.general_rendered;
+  $('run-task').disabled = s.mode !== 'live'; $('task').disabled = s.mode !== 'live';
+  if (s.mode !== 'live') $('task').placeholder = 'Custom tasks need live mode';
+  $('replay').checked = !!s.replay; $('replay').disabled = s.mode !== 'live';
+}
+function renderCounters(c, p, running) {
+  $('c-int').textContent = c.intercepted; $('c-exec').textContent = c.executed; $('c-block').textContent = c.blocked;
+  const can = p.frontier_context_canaries + p.channels.reduce((a, ch) => a + ch.canaries, 0);
+  $('c-can').textContent = can; $('c-can').style.color = can ? 'var(--block)' : '';
+  $('c-ver').textContent = c.policy_version;
+  $('running').textContent = running ? `Running scene ${running}…` : '';
+  for (const b of document.querySelectorAll('#scenes button, #run-all, #run-task, #reset')) b.disabled = !!running || (b.id === 'run-task' && state?.mode !== 'live');
+  const pr = $('privacy'); pr.replaceChildren();
+  const row = (k, v) => { pr.append(el('span', { text: k }), el('b', { class: v ? 'bad' : '', text: String(v) })); };
+  row('canaries in frontier-bound context', p.frontier_context_canaries);
+  for (const ch of p.channels) row(`canaries in ${ch.channel} API requests (${ch.requests} sent)`, ch.canaries);
+  row('canaries on the reason channel to the actor', p.reason_channel_canaries);
+}
+
+// ---------------------------------------------------------------- timeline
+const tl = $('timeline');
+function nearBottom() { return window.innerHeight + window.scrollY >= document.body.offsetHeight - 160; }
+function verdictRow(name, v) {
+  if (!v) return el('div', { class: 'verdict' }, [el('span', { class: 'layer', text: name }), el('span', { class: 'pill skipped', text: 'not reached' }), el('span', {}), el('span', {})]);
+  const pill = el('span', { class: 'pill ' + (v.allow ? 'allow' : 'block'), text: v.allow ? 'allow' : 'block' });
+  const rule = v.violated?.length ? el('span', { class: 'rule', text: ` (${v.violated.join(', ')})` }) : null;
+  const inc = v.inconsistent ? el('span', { class: 'rule', text: ' — inconsistent: verdict contradicts its own citation' }) : null;
+  return el('div', { class: 'verdict' }, [el('span', { class: 'layer', text: name }), pill, el('span', { class: 'reason' }, [v.reason || '', rule, inc]), el('span', { class: 'ms', text: v.latency_ms ? secs(v.latency_ms) : '' })]);
+}
+function renderDecision(d) {
+  if (!d.mutating) {
+    return el('div', { class: 'readonly' }, [el('code', { text: d.call_raw }), el('span', { text: 'read-only, not verified →' }), el('span', { class: 'res', text: d.result })]);
+  }
+  const outside = el('div', { class: 'view outside' }, [
+    el('div', { class: 'where' }, [el('b', { text: 'Outside the perimeter' }), ' — what the actor sent and the frontier verifier sees']),
+    el('pre', { text: d.call_sanitized }),
+    el('div', { class: 'verdicts' }, [verdictRow('frontier', d.verdicts.frontier)]),
+  ]);
+  const inside = el('div', { class: 'view inside' }, [
+    el('div', { class: 'where' }, [el('b', { text: 'Inside the perimeter' }), ' — real values, private rules']),
+    el('pre', { text: d.call_raw }),
+    el('div', { class: 'verdicts' }, [verdictRow('backstop', d.verdicts.backstop), verdictRow('local', d.verdicts.local)]),
+  ]);
+  const status = d.executed ? 'Executed' : `Blocked by ${d.blocked_by.join(' and ')}`;
+  const text = d.executed ? d.result : `Reason sent to the actor: “${d.reason_to_actor}”` + (d.escalated ? ' — escalated to a human' : '');
+  const outcome = el('div', { class: 'outcome' }, [el('span', { class: 'status', text: status }), el('span', { class: 'text', text: text }),
+    el('span', { class: 'meta', text: `policy ${d.policy_version} · gateway ${secs(d.latency_ms)}` })]);
+  return el('article', { class: 'decision ' + (d.executed ? 'ok' : 'blocked') }, [el('div', { class: 'views' }, [outside, inside]), outcome]);
+}
+function renderEvent(e) {
+  switch (e.kind) {
+    case 'scene': return el('section', { class: 'scene' }, [el('h3', { text: e.key === 'custom' ? 'Custom task' : `Scene ${e.key}: ${e.title}` }),
+      el('div', { class: 'task' }, [el('div', { text: `Task: ${e.task}` }), e.task_sanitized !== e.task ? el('div', { class: 'sees', text: `Actor sees: ${e.task_sanitized}` }) : null])]);
+    case 'decision': return renderDecision(e);
+    case 'note': return el('div', { class: 'note', text: e.text });
+    case 'error': return el('div', { class: 'error', text: e.text });
+    case 'summary': return el('div', { class: 'summary' }, [el('div', { text: `Actor: ${e.summary}` }),
+      el('div', { class: 'harm' + (e.harms.length ? ' bad' : ''), text: e.harms.length ? `Harm check over state: ${e.harms.join('; ')}` : 'Harm check over state: none' })]);
+    case 'privacy': {
+      const can = e.channels.reduce((a, ch) => a + ch.canaries, 0) + e.frontier_context_canaries;
+      return el('div', { class: 'privacy-strip' }, [el('span', {}, [el('b', { text: `${can} canaries` }), ' reached the frontier side']),
+        ...e.channels.map(ch => el('span', { text: `${ch.channel}: ${ch.canaries} in ${ch.requests} requests` })),
+        el('span', { text: `reason channel: ${e.reason_channel_canaries}` })]);
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- actions & polling
+async function run(path, body) {
+  try { setMsg(''); await api(path, 'POST', body); } catch (e) { setMsg(e.message, true); }
+}
+$('run-task').onclick = () => { const t = $('task').value.trim(); if (t) run('/api/task', { task: t }); };
+$('task').onkeydown = (ev) => { if (ev.key === 'Enter') $('run-task').click(); };
+$('run-all').onclick = async () => { for (const k of ['1', '2', '3', '4', '5']) { await run(`/api/scene/${k}`); while (true) { await new Promise(r => setTimeout(r, 500)); const j = await api('/api/events?since=' + since); if (!j.running) break; } } };
+$('reset').onclick = async () => { try { tl.replaceChildren(emptyEl); since = 0; renderState(await api('/api/reset', 'POST')); setMsg('Environment and policy reset.'); } catch (e) { setMsg(e.message, true); } };
+$('yaml').oninput = () => { yamlDirty = true; };
+$('replay').onchange = async () => { try { await api('/api/replay', 'POST', { on: $('replay').checked }); setMsg($('replay').checked ? 'Scenes will replay scripted proposals through the live verifiers.' : 'Scenes use the live actor.'); } catch (e) { setMsg(e.message, true); } };
+$('apply-yaml').onclick = async () => { try { yamlDirty = false; renderState(await api('/api/policy/yaml', 'POST', { text: $('yaml').value })); setMsg(`private.yaml applied; policy version ${state.policy.version}.`); } catch (e) { setMsg(e.message, true); yamlDirty = true; } };
+
+async function poll() {
+  try {
+    const j = await api('/api/events?since=' + since);
+    if (j.events.length) {
+      const stick = nearBottom();
+      emptyEl.remove();
+      for (const e of j.events) { const n = renderEvent(e); if (n) tl.append(n); }
+      since = j.n_events;
+      if (stick) window.scrollTo(0, document.body.scrollHeight);
+      const s = await api('/api/state'); renderState(s);
+    } else if (state) {
+      renderCounters(j.counters, j.privacy, j.running);
+    }
+  } catch (e) { /* server restarting; try again */ }
+}
+(async () => { renderState(await api('/api/state')); since = state.n_events; setInterval(poll, 700); })();
+</script>
+</body>
+</html>
